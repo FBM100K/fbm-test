@@ -1,0 +1,22 @@
+# Secrets Streamlit - NE JAMAIS COMMITER
+.streamlit/secrets.toml
+
+# Credentials Google
+*.json
+service-account-*.json
+
+# Environnement virtuel Python
+venv/
+env/
+.venv/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+.vscode/
