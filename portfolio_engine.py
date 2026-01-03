@@ -1,5 +1,7 @@
 """
-Portfolio Engine V3.0 - Module de calculs financiers avec multi-devises
+Portfolio Engine V4.0 - Module de calculs financiers avec multi-devises
+✅ Filtrage automatique des transactions soft deleted
+✅ Conservation logique PRU/PnL existante
 """
 
 import pandas as pd
@@ -13,6 +15,8 @@ class PortfolioEngine:
     def __init__(self, df_transactions: pd.DataFrame):
         self.df = df_transactions.copy()
         self._normalize_dataframe()
+        # ✅ NOUVEAU : Filtrage automatique des transactions supprimées
+        self._filter_deleted_transactions()
     
     def _normalize_dataframe(self):
         """Normalise les types de données du DataFrame"""
@@ -31,6 +35,24 @@ class PortfolioEngine:
         for col in ["Type", "Ticker", "Profil", "Devise", "Devise_reference"]:
             if col in self.df.columns:
                 self.df[col] = self.df[col].fillna("").astype(str)
+    
+    def _filter_deleted_transactions(self):
+        """
+        ✅ NOUVEAU P0 : Filtre les transactions avec is_deleted=TRUE.
+        Cette méthode est appelée automatiquement à l'initialisation.
+        """
+        if "is_deleted" in self.df.columns:
+            # Parse booléen compatible Google Sheets
+            self.df["is_deleted_bool"] = self.df["is_deleted"].apply(
+                lambda x: str(x).strip().upper() in ["TRUE", "1", "YES", "OUI"] if x else False
+            )
+            # Filtrer les lignes non supprimées
+            initial_count = len(self.df)
+            self.df = self.df[~self.df["is_deleted_bool"]].copy()
+            deleted_count = initial_count - len(self.df)
+            
+            if deleted_count > 0:
+                print(f"ℹ️ {deleted_count} transaction(s) supprimée(s) ignorée(s) dans les calculs")
     
     def calculate_pru(self, ticker: str, profil: str = None, date_limite: Optional[datetime] = None) -> float:
         """
@@ -107,17 +129,15 @@ class PortfolioEngine:
                 f"1. Acheter en {existing_devise}\n"
                 f"2. Vendre votre position {existing_devise} avant d'acheter en {devise}"
             )
-        
-        return True, 
+        return True,""
+    
     def validate_sale(self, ticker: str, profil: str, quantite_vente: float, date_vente: datetime) -> Tuple[bool, str]:
-        # Vérifier quantité pour LE PROFIL spécifique
+        """Valide qu'une vente est possible."""
         qty_disponible = self.get_position_quantity(ticker, profil=profil, date_limite=date_vente)
         
-        # Vérification quantité positive
         if quantite_vente <= 0:
             return False, "❌ La quantité de vente doit être supérieure à 0"
         
-        # Vérification stock suffisant
         if qty_disponible < quantite_vente:
             return False, (
                 f"❌ Quantité insuffisante pour {profil}\n"
@@ -129,13 +149,19 @@ class PortfolioEngine:
     
     def prepare_achat_transaction(self, ticker: str, profil: str, quantite: float, prix_achat: float,
                                  frais: float, date_achat: datetime, devise: str, note: str = "",
-                                 currency_manager=None) -> Dict:
+                                 currency_manager=None, taux_change_override: Optional[float] = None) -> Dict:
         """Prépare une transaction d'achat avec taux de change figé."""
         devise_reference = "EUR"
         taux_change = 1.0
         
-        if devise != devise_reference and currency_manager:
-            taux_change = currency_manager.get_rate(devise_reference, devise)
+        if devise != devise_reference:
+            if taux_change_override is not None and taux_change_override > 0:
+                taux_change = float(taux_change_override)
+            elif currency_manager:
+                taux_change = currency_manager.get_rate(devise_reference, devise)
+        
+        # ✅ Import local pour éviter dépendance circulaire
+        from utils import generate_transaction_id, get_iso_timestamp
         
         return {
             "Date": date_achat.date() if isinstance(date_achat, datetime) else date_achat,
@@ -152,12 +178,17 @@ class PortfolioEngine:
             "PnL réalisé (€/$)": 0.0,
             "PnL réalisé (%)": 0.0,
             "Note": note,
-            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z"
+            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z",
+            # ✅ Nouveaux champs P0
+            "transaction_id": generate_transaction_id(),
+            "created_at": get_iso_timestamp(),
+            "updated_at": get_iso_timestamp(),
+            "is_deleted": "FALSE"
         }
     
     def prepare_sale_transaction(self, ticker: str, profil: str, quantite: float, prix_vente: float,
                                 frais: float, date_vente: datetime, devise: str, note: str = "",
-                                currency_manager=None) -> Optional[Dict]:
+                                currency_manager=None, taux_change_override: Optional[float] = None) -> Optional[Dict]:
         """Prépare une transaction de vente avec PRU_vente figé."""
         is_valid, error_msg = self.validate_sale(ticker, profil, quantite, date_vente)
         if not is_valid:
@@ -174,8 +205,13 @@ class PortfolioEngine:
         
         devise_reference = "EUR"
         taux_change = 1.0
-        if devise != devise_reference and currency_manager:
-            taux_change = currency_manager.get_rate(devise_reference, devise)
+        if devise != devise_reference:
+            if taux_change_override is not None and taux_change_override > 0:
+                taux_change = float(taux_change_override)
+            elif currency_manager:
+                taux_change = currency_manager.get_rate(devise_reference, devise)
+        
+        from utils import generate_transaction_id, get_iso_timestamp
         
         return {
             "Date": date_vente.date() if isinstance(date_vente, datetime) else date_vente,
@@ -192,7 +228,11 @@ class PortfolioEngine:
             "PnL réalisé (€/$)": round(pnl_reel, 2),
             "PnL réalisé (%)": round(pnl_pct, 2),
             "Note": note,
-            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z"
+            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z",
+            "transaction_id": generate_transaction_id(),
+            "created_at": get_iso_timestamp(),
+            "updated_at": get_iso_timestamp(),
+            "is_deleted": "FALSE"
         }
     
     def prepare_depot_transaction(self, profil: str, montant: float, date_depot: datetime, 
@@ -202,6 +242,8 @@ class PortfolioEngine:
         taux_change = 1.0
         if devise != devise_reference and currency_manager:
             taux_change = currency_manager.get_rate(devise_reference, devise)
+        
+        from utils import generate_transaction_id, get_iso_timestamp
         
         return {
             "Date": date_depot.date() if isinstance(date_depot, datetime) else date_depot,
@@ -218,7 +260,11 @@ class PortfolioEngine:
             "PnL réalisé (€/$)": 0.0,
             "PnL réalisé (%)": 0.0,
             "Note": note,
-            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z"
+            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z",
+            "transaction_id": generate_transaction_id(),
+            "created_at": get_iso_timestamp(),
+            "updated_at": get_iso_timestamp(),
+            "is_deleted": "FALSE"
         }
     
     def prepare_retrait_transaction(self, profil: str, montant: float, date_retrait: datetime,
@@ -228,6 +274,8 @@ class PortfolioEngine:
         taux_change = 1.0
         if devise != devise_reference and currency_manager:
             taux_change = currency_manager.get_rate(devise_reference, devise)
+        
+        from utils import generate_transaction_id, get_iso_timestamp
         
         return {
             "Date": date_retrait.date() if isinstance(date_retrait, datetime) else date_retrait,
@@ -244,7 +292,11 @@ class PortfolioEngine:
             "PnL réalisé (€/$)": 0.0,
             "PnL réalisé (%)": 0.0,
             "Note": note,
-            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z"
+            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z",
+            "transaction_id": generate_transaction_id(),
+            "created_at": get_iso_timestamp(),
+            "updated_at": get_iso_timestamp(),
+            "is_deleted": "FALSE"
         }
     
     def prepare_dividende_transaction(self, ticker: str, profil: str, montant_brut: float, 
@@ -257,6 +309,8 @@ class PortfolioEngine:
         taux_change = 1.0
         if devise != devise_reference and currency_manager:
             taux_change = currency_manager.get_rate(devise_reference, devise)
+        
+        from utils import generate_transaction_id, get_iso_timestamp
         
         return {
             "Date": date_dividende.date() if isinstance(date_dividende, datetime) else date_dividende,
@@ -273,7 +327,11 @@ class PortfolioEngine:
             "PnL réalisé (€/$)": round(montant_net, 2),
             "PnL réalisé (%)": 0.0,
             "Note": note + f" | Brut: {montant_brut:.2f}, Retenue: {retenue_source:.2f}",
-            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z"
+            "History_Log": f"Créé le {datetime.utcnow().isoformat()}Z",
+            "transaction_id": generate_transaction_id(),
+            "created_at": get_iso_timestamp(),
+            "updated_at": get_iso_timestamp(),
+            "is_deleted": "FALSE"
         }
     
     def get_portfolio_summary(self, profil: Optional[str] = None) -> Dict:
@@ -435,7 +493,7 @@ class PortfolioEngine:
         positions = []
         for (ticker, prof), group in df_actifs.groupby(["Ticker", "Profil"]):
             qty = group["Quantité"].sum()
-            if qty > 0:  # Uniquement positions ouvertes
+            if qty > 0:
                 pru = self.calculate_pru(ticker, prof)
                 devise_position = group.iloc[0]["Devise"]
                 nom_complet = group.iloc[0].get("Nom complet", ticker)
@@ -452,12 +510,7 @@ class PortfolioEngine:
     
     def get_positions_consolide(self) -> pd.DataFrame:
         """
-        ✅ V3.0 - Retourne les positions consolidées (tous profils confondus).
-        CORRECTIONS:
-        - Ajout colonne "Nom complet"
-        - Calcul PRU correct avec frais
-        - Gestion devise unique par ticker
-        
+        Retourne les positions consolidées (tous profils confondus).
         Format: Ticker, Nom complet, Quantité, PRU, Devise
         """
         df = self.df.copy()
@@ -466,26 +519,20 @@ class PortfolioEngine:
         if df_actifs.empty:
             return pd.DataFrame(columns=["Ticker", "Nom complet", "Quantité", "PRU", "Devise"])
 
-        # Groupement par Ticker (on suppose devise unique par ticker)
         positions = []
         
         for ticker, group in df_actifs.groupby("Ticker"):
-            # Filtrer achats/ventes uniquement
             trades = group[group["Type"].isin(["Achat", "Vente"])]
             
             if trades.empty:
                 continue
             
-            # Quantité nette
             qty_nette = trades["Quantité"].sum()
             
             if qty_nette <= 0:
-                continue  # Position fermée
+                continue
             
-            # Calcul PRU consolidé (sans filtre profil)
             pru = self.calculate_pru(ticker, profil=None)
-            
-            # Récupération devise et nom complet
             devise = trades.iloc[0]["Devise"]
             nom_complet = trades.iloc[0].get("Nom complet", ticker)
             
