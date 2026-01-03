@@ -99,8 +99,14 @@ def init_google_sheets():
         creds_info = st.secrets["google_service_account"]
         credentials = Credentials.from_service_account_info(creds_info, scopes=SCOPE)
         gc_client = gspread.authorize(credentials)
-        sh = gc_client.open(SHEET_NAME)
+
+        # ✅ Ouvrir par ID (fiable)
+        spreadsheet_id = st.secrets["SPREADSHEET_ID"]
+        sh = gc_client.open_by_key(spreadsheet_id)
+
+        # ✅ Option 1 : première feuille
         sheet = sh.sheet1
+
         return sheet, sh, gc_client
     except Exception as e:
         st.error("❌ Erreur d'authentification Google Sheets")
