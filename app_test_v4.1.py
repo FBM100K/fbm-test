@@ -1148,6 +1148,7 @@ with tab1:
         st.info("ℹ️ Aucune transaction")
 
     # Section suppression
+    st.divider()
     st.subheader("🗑️ Supprimer une transaction")
     
     # Liste déroulante des transactions actives
