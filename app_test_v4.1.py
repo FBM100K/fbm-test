@@ -33,7 +33,7 @@ st.set_page_config(
 )
 
 st.markdown(
-    "<h1 style='text-align: left; font-size: 32px;'>📊 Dashboard Portefeuille - FBM V4.0</h1>",
+    "<h1 style='text-align: left; font-size: 32px;'>Dashboard Portefeuille - FBM V4.0</h1>",
     unsafe_allow_html=True
 )
 
@@ -689,7 +689,9 @@ with tab1:
                 # Normalisation simple Euronext Paris : .PAR -> .PA (yfinance)
                 if ticker_extracted.endswith(".PAR"):
                     ticker_extracted = ticker_extracted[:-4] + ".PA"
+
                 st.session_state.ticker_selected = ticker_extracted
+
             
             # Confirmation ticker sélectionné
             if st.session_state.ticker_selected:
@@ -732,27 +734,7 @@ with tab1:
             index=0,
             help="Devise dans laquelle la transaction est effectuée"
         )
-        # --- Taux de change figé (modifiable) ---
-        devise_reference = "EUR"
-
-        taux_defaut = 1.0
-        if devise != devise_reference:
-            # taux EUR -> devise (ex: 1 EUR = 1.10 USD)
-            taux_defaut = currency_manager.get_rate(devise_reference, devise)
-
-        taux_change_input = st.text_input(
-            f"Taux de change figé ({devise_reference}→{devise})",
-            value=f"{taux_defaut:.6f}",
-            help="Par défaut: taux courant. Modifiez si vous voulez figer un taux spécifique sur cette transaction."
-        )
-
-        taux_change_override = parse_float(taux_change_input)
-        if devise == devise_reference:
-            taux_change_override = 1.0
-
-        if devise != devise_reference and taux_change_override <= 0:
-            st.error("❌ Le taux de change doit être > 0")
-
+        
         note = st.text_area(
             "Note (optionnel)",
             "",
@@ -941,8 +923,7 @@ with tab1:
                             date_achat=date_tx,
                             devise=devise,
                             note=note,
-                            currency_manager=currency_manager,
-                            taux_change_override=taux_change_override
+                            currency_manager=currency_manager
                         )
                 
                 elif type_tx == "Vente":
@@ -955,8 +936,7 @@ with tab1:
                         date_vente=date_tx,
                         devise=devise,
                         note=note,
-                        currency_manager=currency_manager,
-                        taux_change_override=taux_change_override
+                        currency_manager=currency_manager
                     )
                     if transaction is None:
                         st.error("❌ Impossible de créer la vente (quantité insuffisante)")
@@ -1105,19 +1085,9 @@ with tab2:
             
             # ÉTAPE 4 : Calcul PnL latent (AVANT conversion)
             positions["PnL_latent"] = (positions["Prix_actuel"] - positions["PRU"]) * positions["Quantité"]
-            positions["Cost_basis_origine"] = positions["PRU"] * positions["Quantité"]
             positions["PnL_latent_%"] = ((positions["Prix_actuel"] - positions["PRU"]) / positions["PRU"] * 100).round(2)
             positions["PnL_latent_%"] = positions["PnL_latent_%"].fillna(0.0)
             
-            # ✅ Conversion du coût investi dans la devise d'affichage
-            positions["Cost_basis_converti"] = positions.apply(
-                lambda row: currency_manager.convert(
-                    row["Cost_basis_origine"], row["Devise"], devise_affichage
-                ) if row["Devise"] != devise_affichage
-                else row["Cost_basis_origine"],
-                axis=1
-)
-
             # ÉTAPE 5 : Conversion Valeur (APRÈS avoir créé Valeur_origine)
             positions["Valeur_convertie"] = positions.apply(
                 lambda row: currency_manager.convert(
@@ -1139,10 +1109,9 @@ with tab2:
             # ÉTAPE 7 : Agrégation totaux
             total_valeur = positions["Valeur_convertie"].sum()
             total_pnl_latent = positions["PnL_latent_converti"].sum()
-            total_cost_basis = positions["Cost_basis_converti"].sum()
-
-            pnl_latent_pct_global = (total_pnl_latent / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
-
+        else:
+            total_valeur = 0.0
+            total_pnl_latent = 0.0
         
         # ============================================
         # FIN BLOC CORRIGÉ
@@ -1152,9 +1121,8 @@ with tab2:
         k4.metric(
             "📈 PnL Latent",
             f"{total_pnl_latent:,.2f} {symbole}",
-            delta=f"{pnl_latent_pct_global:.2f}%"
+            delta=f"{(total_pnl_latent/total_valeur*100):.2f}%" if total_valeur > 0 else "0%"
         )
-
         k5.metric("✅ PnL Réalisé", f"{summary['pnl_realise_total']:,.2f} {symbole}")
         
         st.divider()
@@ -1275,23 +1243,12 @@ with tab3:
                         (positions_profil["Prix_actuel"] - positions_profil["PRU"])
                         * positions_profil["Quantité"]
                     )
-                    # ✅ Coût investi (cost basis) = PRU * Quantité
-                    positions_profil["Cost_basis_origine"] = positions_profil["PRU"] * positions_profil["Quantité"]
                     positions_profil["PnL_latent_%"] = (
                         (positions_profil["Prix_actuel"] - positions_profil["PRU"]) 
                         / positions_profil["PRU"] * 100
                     ).round(2)
                     positions_profil["PnL_latent_%"] = positions_profil["PnL_latent_%"].fillna(0.0)
-
-                    # ✅ Conversion du coût investi dans la devise d'affichage
-                    positions_profil["Cost_basis_converti"] = positions_profil.apply(
-                        lambda row: currency_manager.convert(
-                            row["Cost_basis_origine"], row["Devise"], devise_affichage
-                        ) if row["Devise"] != devise_affichage
-                        else row["Cost_basis_origine"],
-                        axis=1
-                    )           
-
+                    
                     # ÉTAPE 5 : Conversion Valeur (APRÈS avoir créé Valeur_origine)
                     positions_profil["Valeur_convertie"] = positions_profil.apply(
                         lambda row: currency_manager.convert(
@@ -1313,13 +1270,10 @@ with tab3:
                     # ÉTAPE 7 : Agrégation totaux
                     total_valeur_profil = positions_profil["Valeur_convertie"].sum()
                     total_pnl_latent_profil = positions_profil["PnL_latent_converti"].sum()
-                    total_cost_basis_profil = positions_profil["Cost_basis_converti"].sum()
-
-                    pnl_latent_pct_profil = (total_pnl_latent_profil / total_cost_basis_profil * 100) if total_cost_basis_profil > 0 else 0.0
-                    total_cost_basis_profil = 0.0
-                    pnl_latent_pct_profil = 0.0
-
-
+                else:
+                    total_valeur_profil = 0.0
+                    total_pnl_latent_profil = 0.0
+                
                 # --- KPI Bloc compact ---
                 row1_col1, row1_col2 = st.columns(2)
                 row2_col1, row2_col2 = st.columns(2)
@@ -1328,11 +1282,7 @@ with tab3:
                 row1_col1.metric("💵 Dépôts", f"{summary_profil['total_depots']:,.0f} {symbole}")
                 row1_col2.metric("💰 Liquidités", f"{summary_profil['cash']:,.0f} {symbole}")
                 row2_col1.metric("📊 Valeur actifs", f"{total_valeur_profil:,.0f} {symbole}")
-                row2_col2.metric(
-                    "📈 PnL Latent",
-                    f"{total_pnl_latent_profil:,.0f} {symbole}",
-                    delta=f"{pnl_latent_pct_profil:.2f}%"
-                )
+                row2_col2.metric("📈 PnL Latent", f"{total_pnl_latent_profil:,.0f} {symbole}")
                 row3_col1.metric("✅ PnL Réalisé", f"{summary_profil['pnl_realise_total']:,.0f} {symbole}")
                 row3_col2.metric("💎 Total", f"{summary_profil['cash'] + total_valeur_profil:,.0f} {symbole}")
                 
@@ -1468,7 +1418,6 @@ with st.sidebar:
                 file_name=f"portfolio_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
-    
     st.divider()
     
     # --- Informations ---
@@ -1486,7 +1435,6 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True
     )
-
 # -----------------------
 # FOOTER
 # -----------------------
