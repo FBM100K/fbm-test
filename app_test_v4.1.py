@@ -114,6 +114,8 @@ def init_google_sheets():
         return None, None, None
 
 sheet, sh, gc_client = init_google_sheets()
+st.sidebar.write("Spreadsheet ID:", spreadsheet_id)
+st.sidebar.write("Spreadsheet title:", sh.title)
 
 # -----------------------
 # Helper Functions
