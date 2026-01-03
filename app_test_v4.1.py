@@ -85,7 +85,7 @@ def init_google_sheets():
         gc_client = gspread.authorize(credentials)
 
         # ✅ Ouvrir par ID (fiable)
-        spreadsheet_id = st.secrets["1AaV_a_Zq2dK4LWQc3FjCqxSI0DzzxOm8hnbBRnsuxcg"]
+        spreadsheet_id = st.secrets["SPREADSHEET_ID"]
         sh = gc_client.open_by_key(spreadsheet_id)
 
         # ✅ Option 1 : première feuille
