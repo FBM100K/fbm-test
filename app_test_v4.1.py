@@ -1125,9 +1125,14 @@ with tab1:
     # Historique
     st.divider()
     st.subheader("📜 Historique des transactions")
-    
+
     if st.session_state.df_transactions is not None and not st.session_state.df_transactions.empty:
         df_display = st.session_state.df_transactions.copy()
+        
+        # ✅ NOUVEAU : Filtrer les transactions supprimées
+        if "is_deleted" in df_display.columns:
+            df_display = df_display[~df_display["is_deleted"].apply(parse_bool)]
+        
         df_display["Date_sort"] = pd.to_datetime(df_display["Date"], errors="coerce")
         df_display = df_display.sort_values(by="Date_sort", ascending=False)
         
@@ -1141,6 +1146,65 @@ with tab1:
         st.dataframe(df_display.head(100), use_container_width=True, hide_index=True)
     else:
         st.info("ℹ️ Aucune transaction")
+
+    # Section suppression
+    st.subheader("🗑️ Supprimer une transaction")
+    
+    # Liste déroulante des transactions actives
+    active_txs = df_all[~df_all["is_deleted"].apply(parse_bool)].copy()
+    
+    if active_txs.empty:
+        st.warning("⚠️ Aucune transaction active à supprimer")
+    else:
+        active_txs["Date_sort"] = pd.to_datetime(active_txs["Date"], errors="coerce")
+        active_txs = active_txs.sort_values("Date_sort", ascending=False)
+        
+        # Créer des labels lisibles
+        active_txs["Label"] = active_txs.apply(
+            lambda r: f"{r['Date']} | {r['Type']} | {r['Ticker']} | {r['Profil']} | Qté:{r['Quantité']:.2f}",
+            axis=1
+        )
+        
+        selected_label = st.selectbox(
+            "Sélectionnez la transaction à supprimer :",
+            options=active_txs["Label"].tolist(),
+            help="Choisissez avec précaution"
+        )
+        
+        if selected_label:
+            selected_tx = active_txs[active_txs["Label"] == selected_label].iloc[0]
+            
+            st.warning(f"""
+            **⚠️ Vous allez supprimer cette transaction :**
+            
+            - **Date** : {selected_tx['Date']}
+            - **Type** : {selected_tx['Type']}
+            - **Ticker** : {selected_tx['Ticker']}
+            - **Profil** : {selected_tx['Profil']}
+            - **Quantité** : {selected_tx['Quantité']}
+            - **Prix** : {selected_tx['Prix_unitaire']} {selected_tx['Devise']}
+            - **ID** : {selected_tx['transaction_id']}
+            
+            Cette action marquera la transaction comme supprimée (soft delete).
+            Elle restera visible dans l'historique mais n'impactera plus les calculs.
+            """)
+            
+            confirm_delete = st.checkbox("Je confirme vouloir supprimer cette transaction")
+            
+            if st.button("🗑️ Supprimer définitivement", type="primary", disabled=not confirm_delete):
+                with st.spinner("Suppression en cours..."):
+                    success = soft_delete_transaction(selected_tx['transaction_id'])
+                    
+                    if success:
+                        st.success("✅ Transaction supprimée avec succès")
+                        
+                        # Invalidation cache
+                        st.cache_data.clear()
+                        st.session_state.df_transactions = load_transactions_from_sheet()
+                        
+                        st.rerun()
+                    else:
+                        st.error("❌ Erreur lors de la suppression")
 
 # Tab2 et Tab3 conservés identiques (Portefeuille et Répartition)
 # Je les conserve sans modification pour économiser des tokens
@@ -1335,65 +1399,6 @@ with tab5:
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
             st.divider()
-            
-            # Section suppression
-            st.subheader("🗑️ Supprimer une transaction")
-            
-            # Liste déroulante des transactions actives
-            active_txs = df_all[~df_all["is_deleted"].apply(parse_bool)].copy()
-            
-            if active_txs.empty:
-                st.warning("⚠️ Aucune transaction active à supprimer")
-            else:
-                active_txs["Date_sort"] = pd.to_datetime(active_txs["Date"], errors="coerce")
-                active_txs = active_txs.sort_values("Date_sort", ascending=False)
-                
-                # Créer des labels lisibles
-                active_txs["Label"] = active_txs.apply(
-                    lambda r: f"{r['Date']} | {r['Type']} | {r['Ticker']} | {r['Profil']} | Qté:{r['Quantité']:.2f}",
-                    axis=1
-                )
-                
-                selected_label = st.selectbox(
-                    "Sélectionnez la transaction à supprimer :",
-                    options=active_txs["Label"].tolist(),
-                    help="Choisissez avec précaution"
-                )
-                
-                if selected_label:
-                    selected_tx = active_txs[active_txs["Label"] == selected_label].iloc[0]
-                    
-                    st.warning(f"""
-                    **⚠️ Vous allez supprimer cette transaction :**
-                    
-                    - **Date** : {selected_tx['Date']}
-                    - **Type** : {selected_tx['Type']}
-                    - **Ticker** : {selected_tx['Ticker']}
-                    - **Profil** : {selected_tx['Profil']}
-                    - **Quantité** : {selected_tx['Quantité']}
-                    - **Prix** : {selected_tx['Prix_unitaire']} {selected_tx['Devise']}
-                    - **ID** : {selected_tx['transaction_id']}
-                    
-                    Cette action marquera la transaction comme supprimée (soft delete).
-                    Elle restera visible dans l'historique mais n'impactera plus les calculs.
-                    """)
-                    
-                    confirm_delete = st.checkbox("Je confirme vouloir supprimer cette transaction")
-                    
-                    if st.button("🗑️ Supprimer définitivement", type="primary", disabled=not confirm_delete):
-                        with st.spinner("Suppression en cours..."):
-                            success = soft_delete_transaction(selected_tx['transaction_id'])
-                            
-                            if success:
-                                st.success("✅ Transaction supprimée avec succès")
-                                
-                                # Invalidation cache
-                                st.cache_data.clear()
-                                st.session_state.df_transactions = load_transactions_from_sheet()
-                                
-                                st.rerun()
-                            else:
-                                st.error("❌ Erreur lors de la suppression")
 
 # -----------------------
 # SIDEBAR : Actions & Stats
