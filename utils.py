@@ -1,12 +1,99 @@
 """
-Utils V3.0 - Fonctions utilitaires pour le dashboard
+Utils V4.0 P0 - Fonctions utilitaires pour le dashboard
 ✅ Standardisation affichage tableaux positions
 ✅ Formatage valeurs avec conversions devise
+✅ NOUVEAU P0: Helpers pour append-only et soft delete
 """
-
 import pandas as pd
-from typing import Optional
+import uuid
+from datetime import datetime
+from typing import Optional, Tuple
 
+def generate_transaction_id() -> str:
+    """Génère un UUID4 unique pour une transaction."""
+    return str(uuid.uuid4())
+
+
+def get_iso_timestamp() -> str:
+    """Retourne timestamp ISO 8601 actuel (UTC)."""
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def normalize_ticker(raw_ticker: str) -> str:
+    """
+    Normalise les tickers pour compatibilité yfinance.
+    
+    Règles :
+    - Euronext Paris: .PAR -> .PA
+    - Euronext Amsterdam: .AS (inchangé)
+    - Euronext Brussels: .BR (inchangé)
+    - Xetra (Allemagne): .DE (inchangé)
+    - Milan: .MI (inchangé)
+    - Madrid: .MC (inchangé)
+    - LSE: .L (inchangé)
+    
+    Args:
+        raw_ticker: Ticker brut (ex: "LVMH.PAR", "ASML.AS")
+    
+    Returns:
+        Ticker normalisé (ex: "LVMH.PA", "ASML.AS")
+    """
+    if not raw_ticker or not isinstance(raw_ticker, str):
+        return raw_ticker
+    
+    ticker = raw_ticker.strip().upper()
+    
+    # Cas spécial Euronext Paris
+    if ticker.endswith(".PAR"):
+        return ticker[:-4] + ".PA"
+    
+    # Suffixes reconnus (pas de modification)
+    known_suffixes = [".PA", ".AS", ".BR", ".DE", ".MI", ".MC", ".L"]
+    for suffix in known_suffixes:
+        if ticker.endswith(suffix):
+            return ticker
+    
+    return ticker
+
+
+def parse_bool(val) -> bool:
+    """
+    Parse une valeur en booléen (compatible Google Sheets).
+    
+    Args:
+        val: Valeur à parser (peut être str, bool, int, None)
+    
+    Returns:
+        bool: True si valeur représente vrai, False sinon
+    
+    Exemples:
+        parse_bool("TRUE") -> True
+        parse_bool("FALSE") -> False
+        parse_bool("1") -> True
+        parse_bool("") -> False
+        parse_bool(None) -> False
+    """
+    if val is None or val == "":
+        return False
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    
+    s = str(val).strip().upper()
+    return s in ["TRUE", "1", "YES", "OUI"]
+
+def format_bool_for_sheet(val: bool) -> str:
+    """
+    Formate un booléen pour Google Sheets (TRUE/FALSE).
+    
+    Args:
+        val: Booléen à formater
+    
+    Returns:
+        str: "TRUE" ou "FALSE"
+    """
+    return "TRUE" if val else "FALSE"
 
 def format_positions_display(
     positions: pd.DataFrame,
@@ -165,7 +252,7 @@ def get_color_pnl(pnl_percent: float) -> str:
         return "gray"
 
 
-def validate_dataframe_columns(df: pd.DataFrame, required_cols: list) -> tuple[bool, str]:
+def validate_dataframe_columns(df: pd.DataFrame, required_cols: list) -> Tuple[bool, str]:
     """
     Valide qu'un DataFrame possède toutes les colonnes requises.
     
