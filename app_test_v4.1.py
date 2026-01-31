@@ -694,7 +694,7 @@ def get_ticker_full_name(ticker: str) -> str:
 # -----------------------
 # ONGLET 1 : Transactions
 # -----------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "💰 Transactions",
     "📂 Portefeuille",
     "📊 Répartition",
