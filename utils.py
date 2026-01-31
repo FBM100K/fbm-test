@@ -13,47 +13,134 @@ def generate_transaction_id() -> str:
     """Génère un UUID4 unique pour une transaction."""
     return str(uuid.uuid4())
 
-
 def get_iso_timestamp() -> str:
     """Retourne timestamp ISO 8601 actuel (UTC)."""
     return datetime.utcnow().isoformat() + "Z"
-
 
 def normalize_ticker(raw_ticker: str) -> str:
     """
     Normalise les tickers pour compatibilité yfinance.
     
-    Règles :
-    - Euronext Paris: .PAR -> .PA
-    - Euronext Amsterdam: .AS (inchangé)
-    - Euronext Brussels: .BR (inchangé)
-    - Xetra (Allemagne): .DE (inchangé)
-    - Milan: .MI (inchangé)
-    - Madrid: .MC (inchangé)
-    - LSE: .L (inchangé)
+    Mapping Alpha Vantage → yfinance :
+    - Euronext Paris: .PAR → .PA
+    - Euronext Amsterdam: .AMS, .AEX → .AS
+    - Euronext Brussels: .BRU → .BR
+    - Allemagne Francfort: .FRK, .FRA → .F
+    - Allemagne Xetra: .ETR, .XETRA, .GER → .DE
+    - Milan: .MIL → .MI
+    - Madrid: .MAD → .MC
+    - London: .LON, .LSE → .L
+    
+    Suffixes yfinance déjà valides (inchangés) :
+    .PA, .AS, .BR, .F, .DE, .MI, .MC, .L
     
     Args:
-        raw_ticker: Ticker brut (ex: "LVMH.PAR", "ASML.AS")
+        raw_ticker: Ticker brut (ex: "LVMH.PAR", "INPST.AMS", "ALV.FRK")
     
     Returns:
-        Ticker normalisé (ex: "LVMH.PA", "ASML.AS")
+        Ticker normalisé (ex: "LVMH.PA", "INPST.AS", "ALV.F")
     """
     if not raw_ticker or not isinstance(raw_ticker, str):
         return raw_ticker
     
     ticker = raw_ticker.strip().upper()
     
-    # Cas spécial Euronext Paris
-    if ticker.endswith(".PAR"):
-        return ticker[:-4] + ".PA"
+    # Table de mapping Alpha Vantage → yfinance
+    SUFFIX_MAPPING = {
+        # Euronext Paris
+        ".PAR": ".PA",
+        
+        # Euronext Amsterdam
+        ".AMS": ".AS",
+        ".AEX": ".AS",
+        
+        # Euronext Brussels
+        ".BRU": ".BR",
+        
+        # Allemagne - Francfort
+        ".FRK": ".F",
+        ".FRA": ".F",
+        
+        # Allemagne - Xetra (prioritaire pour actions allemandes)
+        ".ETR": ".DE",
+        ".XETRA": ".DE",
+        ".GER": ".DE",
+        
+        # Milan
+        ".MIL": ".MI",
+        
+        # Madrid
+        ".MAD": ".MC",
+        
+        # London
+        ".LON": ".L",
+        ".LSE": ".L",
+    }
     
-    # Suffixes reconnus (pas de modification)
-    known_suffixes = [".PA", ".AS", ".BR", ".DE", ".MI", ".MC", ".L"]
-    for suffix in known_suffixes:
+    # Appliquer le mapping si suffixe connu
+    for old_suffix, new_suffix in SUFFIX_MAPPING.items():
+        if ticker.endswith(old_suffix):
+            base = ticker[:-len(old_suffix)]
+            return base + new_suffix
+    
+    # Suffixes yfinance valides (pas de modification)
+    VALID_YFINANCE_SUFFIXES = [".PA", ".AS", ".BR", ".F", ".DE", ".MI", ".MC", ".L"]
+    for suffix in VALID_YFINANCE_SUFFIXES:
         if ticker.endswith(suffix):
             return ticker
     
+    # Ticker sans suffixe connu (probablement US ou autre marché)
     return ticker
+
+def resolve_ticker_with_fallback(ticker: str, price_fetcher_func) -> Tuple[str, Optional[float]]:
+    """
+    Résout un ticker avec fallback automatique pour l'Allemagne (.F ↔ .DE).
+    
+    Logique :
+    1. Essayer le ticker normalisé tel quel
+    2. Si prix N/A et suffixe allemand → tester variante alternative
+       - .F → essayer .DE
+       - .DE → essayer .F
+    3. Retourner le premier ticker qui fonctionne
+    
+    Args:
+        ticker: Ticker normalisé (ex: "ALV.F", "INPST.AS")
+        price_fetcher_func: Fonction qui prend un ticker et retourne le prix ou None
+    
+    Returns:
+        Tuple (ticker_resolved, price) où :
+        - ticker_resolved : le ticker qui a fonctionné
+        - price : le prix récupéré (ou None si échec total)
+    
+    Exemple:
+        >>> resolve_ticker_with_fallback("ALV.F", fetch_func)
+        ("ALV.DE", 245.30)  # Si .F a échoué mais .DE a fonctionné
+    """
+    # Essayer le ticker normalisé d'abord
+    price = price_fetcher_func(ticker)
+    
+    if price is not None and price > 0:
+        return ticker, price
+    
+    # Fallback uniquement pour les tickers allemands
+    if ticker.endswith(".F"):
+        # Essayer .DE à la place
+        alt_ticker = ticker[:-2] + ".DE"
+        alt_price = price_fetcher_func(alt_ticker)
+        
+        if alt_price is not None and alt_price > 0:
+            return alt_ticker, alt_price
+    
+    elif ticker.endswith(".DE"):
+        # Essayer .F à la place
+        alt_ticker = ticker[:-3] + ".F"
+        alt_price = price_fetcher_func(alt_ticker)
+        
+        if alt_price is not None and alt_price > 0:
+            return alt_ticker, alt_price
+    
+    # Aucun fallback n'a fonctionné
+    return ticker, None
 
 
 def parse_bool(val) -> bool:
