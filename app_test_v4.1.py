@@ -87,6 +87,10 @@ if "last_devise_affichage" not in st.session_state:
 if "last_prices" not in st.session_state:
     st.session_state.last_prices = {}
 
+# ✅ NOUVEAU : Cache résolution tickers (ex: ALV.F → ALV.DE)
+if "resolved_tickers" not in st.session_state:
+    st.session_state.resolved_tickers = {}
+
 currency_manager = st.session_state.currency_manager
 
 # -----------------------
@@ -424,14 +428,22 @@ def create_manual_backup():
         st.error(f"❌ Erreur backup : {e}")
         return False
 
-# ✅ NOUVEAU P0 : Cache prix 15min + fallback session
+# ✅ NOUVEAU P0 : Cache prix 15min + fallback session + résolution ticker allemand
 @st.cache_data(ttl=900, show_spinner=False)  # 900s = 15 min
 def fetch_last_close_batch(tickers: list) -> dict:
     """
-    Récupère les prix de marché avec cache 15min et fallback session.
+    Récupère les prix de marché avec :
+    - Cache 15min
+    - Normalisation tickers (Alpha Vantage → yfinance)
+    - Fallback automatique .F ↔ .DE pour l'Allemagne
+    - Fallback session pour prix manquants
     """
     if not tickers:
         return {}
+
+    # Initialiser le cache de résolution si absent
+    if "resolved_tickers" not in st.session_state:
+        st.session_state.resolved_tickers = {}
 
     # Nettoyage + normalisation étendue
     tickers_clean = sorted({
@@ -444,11 +456,27 @@ def fetch_last_close_batch(tickers: list) -> dict:
         return {}
 
     prices = {}
+    tickers_to_resolve = []
 
-    # 1) Batch rapide 1d
+    # 1) Utiliser les tickers déjà résolus en cache
+    for t in tickers_clean:
+        if t in st.session_state.resolved_tickers:
+            resolved_ticker = st.session_state.resolved_tickers[t]
+            # Vérifier si on a un prix en session pour le ticker résolu
+            if resolved_ticker in st.session_state.last_prices:
+                prices[t] = st.session_state.last_prices[resolved_ticker]
+            else:
+                tickers_to_resolve.append(t)
+        else:
+            tickers_to_resolve.append(t)
+    
+    if not tickers_to_resolve:
+        return prices
+
+    # 2) Batch rapide 1d pour les tickers à résoudre
     try:
         data = yf.download(
-            tickers_clean,
+            tickers_to_resolve,
             period="1d",
             progress=False,
             threads=True,
@@ -459,54 +487,91 @@ def fetch_last_close_batch(tickers: list) -> dict:
 
         if isinstance(data.columns, pd.MultiIndex):
             lvl0 = set(data.columns.get_level_values(0))
-            for t in tickers_clean:
+            for t in tickers_to_resolve:
                 if t in lvl0:
                     ser = data[t]["Close"].dropna()
                     if not ser.empty:
                         prices[t] = float(ser.iloc[-1])
+                        st.session_state.resolved_tickers[t] = t  # Pas de changement nécessaire
         else:
-            if "Close" in data and len(tickers_clean) == 1:
+            if "Close" in data and len(tickers_to_resolve) == 1:
                 ser = data["Close"].dropna()
                 if not ser.empty:
-                    prices[tickers_clean[0]] = float(ser.iloc[-1])
+                    t = tickers_to_resolve[0]
+                    prices[t] = float(ser.iloc[-1])
+                    st.session_state.resolved_tickers[t] = t
 
     except Exception as e:
         st.warning(f"⚠️ yfinance batch failed: {e}")
 
-    # 2) Fallback 5d pour ceux manquants
-    for t in tickers_clean:
+    # 3) Fallback 5d + résolution automatique .F ↔ .DE pour tickers manquants
+    for t in tickers_to_resolve:
         if prices.get(t, 0.0) > 0:
             continue
-        try:
-            fb = yf.download(
-                t,
-                period="5d",
-                progress=False,
-                auto_adjust=False,
-                timeout=8,
-            )
-            if "Close" in fb:
-                ser_fb = fb["Close"].dropna()
-                prices[t] = float(ser_fb.iloc[-1]) if not ser_fb.empty else 0.0
-            else:
-                prices[t] = 0.0
-        except Exception:
+        
+        # Définir fonction de fetch pour un seul ticker
+        def fetch_single_ticker(ticker_to_fetch):
+            try:
+                fb = yf.download(
+                    ticker_to_fetch,
+                    period="5d",
+                    progress=False,
+                    auto_adjust=False,
+                    timeout=8,
+                )
+                if "Close" in fb:
+                    ser_fb = fb["Close"].dropna()
+                    if not ser_fb.empty:
+                        return float(ser_fb.iloc[-1])
+            except Exception:
+                pass
+            return None
+        
+        # Essayer le ticker d'origine
+        price = fetch_single_ticker(t)
+        resolved_ticker = t
+        
+        # Si échec et ticker allemand → tester fallback .F ↔ .DE
+        if price is None or price == 0.0:
+            if t.endswith(".F"):
+                alt_ticker = t[:-2] + ".DE"
+                alt_price = fetch_single_ticker(alt_ticker)
+                if alt_price is not None and alt_price > 0:
+                    price = alt_price
+                    resolved_ticker = alt_ticker
+                    st.info(f"ℹ️ Résolution ticker : {t} → {alt_ticker}")
+            
+            elif t.endswith(".DE"):
+                alt_ticker = t[:-3] + ".F"
+                alt_price = fetch_single_ticker(alt_ticker)
+                if alt_price is not None and alt_price > 0:
+                    price = alt_price
+                    resolved_ticker = alt_ticker
+                    st.info(f"ℹ️ Résolution ticker : {t} → {alt_ticker}")
+        
+        # Stocker le résultat
+        if price is not None and price > 0:
+            prices[t] = price
+            st.session_state.resolved_tickers[t] = resolved_ticker
+        else:
             prices[t] = 0.0
     
-    # 3) ✅ NOUVEAU : Fallback session pour les prix manquants
+    # 4) Fallback session pour les prix manquants
     for t in tickers_clean:
         if prices.get(t, 0.0) == 0.0:
             # Utiliser dernier prix connu en session
-            if t in st.session_state.last_prices:
-                prices[t] = st.session_state.last_prices[t]
-                # Indicateur discret (optionnel)
+            resolved = st.session_state.resolved_tickers.get(t, t)
+            if resolved in st.session_state.last_prices:
+                prices[t] = st.session_state.last_prices[resolved]
     
-    # 4) Sauvegarder les prix valides en session pour fallback futur
+    # 5) Sauvegarder les prix valides en session pour fallback futur
     for t, p in prices.items():
         if p > 0:
-            st.session_state.last_prices[t] = p
+            resolved = st.session_state.resolved_tickers.get(t, t)
+            st.session_state.last_prices[resolved] = p
 
     return prices
+
 
 # -----------------------
 # Chargement initial données avec indicateurs visuels
@@ -694,7 +759,7 @@ def get_ticker_full_name(ticker: str) -> str:
 # -----------------------
 # ONGLET 1 : Transactions
 # -----------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💰 Transactions",
     "📂 Portefeuille",
     "📊 Répartition",
