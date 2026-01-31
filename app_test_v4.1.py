@@ -49,13 +49,12 @@ st.markdown(
 )
 
 # Constantes
-SHEET_NAME = "transactions_dashboard"
+SHEET_NAME = "transactions_dashboard_test"
 EXPECTED_COLS = [
     "Date", "Profil", "Type", "Ticker", "Nom complet",
     "Quantité", "Prix_unitaire", "PRU_vente", "Devise",
     "Taux_change", "Devise_reference", "Frais (€/$)",
     "PnL réalisé (€/$)", "PnL réalisé (%)", "Note", "History_Log",
-    # ✅ Nouvelles colonnes P0
     "transaction_id", "created_at", "updated_at", "is_deleted"
 ]
 SCOPE = [
@@ -700,7 +699,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📂 Portefeuille",
     "📊 Répartition",
     "📅 Calendrier",
-    "🗑️ Gestion"  # ✅ Nouvel onglet pour soft delete
 ])
 
 with tab1:
@@ -1147,67 +1145,7 @@ with tab1:
     else:
         st.info("ℹ️ Aucune transaction")
 
-    # Section suppression
-    st.subheader("🗑️ Supprimer une transaction")
-    
-    # Liste déroulante des transactions actives
-    active_txs = df_all[~df_all["is_deleted"].apply(parse_bool)].copy()
-    
-    if active_txs.empty:
-        st.warning("⚠️ Aucune transaction active à supprimer")
-    else:
-        active_txs["Date_sort"] = pd.to_datetime(active_txs["Date"], errors="coerce")
-        active_txs = active_txs.sort_values("Date_sort", ascending=False)
-        
-        # Créer des labels lisibles
-        active_txs["Label"] = active_txs.apply(
-            lambda r: f"{r['Date']} | {r['Type']} | {r['Ticker']} | {r['Profil']} | Qté:{r['Quantité']:.2f}",
-            axis=1
-        )
-        
-        selected_label = st.selectbox(
-            "Sélectionnez la transaction à supprimer :",
-            options=active_txs["Label"].tolist(),
-            help="Choisissez avec précaution"
-        )
-        
-        if selected_label:
-            selected_tx = active_txs[active_txs["Label"] == selected_label].iloc[0]
-            
-            st.warning(f"""
-            **⚠️ Vous allez supprimer cette transaction :**
-            
-            - **Date** : {selected_tx['Date']}
-            - **Type** : {selected_tx['Type']}
-            - **Ticker** : {selected_tx['Ticker']}
-            - **Profil** : {selected_tx['Profil']}
-            - **Quantité** : {selected_tx['Quantité']}
-            - **Prix** : {selected_tx['Prix_unitaire']} {selected_tx['Devise']}
-            - **ID** : {selected_tx['transaction_id']}
-            
-            Cette action marquera la transaction comme supprimée (soft delete).
-            Elle restera visible dans l'historique mais n'impactera plus les calculs.
-            """)
-            
-            confirm_delete = st.checkbox("Je confirme vouloir supprimer cette transaction")
-            
-            if st.button("🗑️ Supprimer définitivement", type="primary", disabled=not confirm_delete):
-                with st.spinner("Suppression en cours..."):
-                    success = soft_delete_transaction(selected_tx['transaction_id'])
-                    
-                    if success:
-                        st.success("✅ Transaction supprimée avec succès")
-                        
-                        # Invalidation cache
-                        st.cache_data.clear()
-                        st.session_state.df_transactions = load_transactions_from_sheet()
-                        
-                        st.rerun()
-                    else:
-                        st.error("❌ Erreur lors de la suppression")
-
 # Tab2 et Tab3 conservés identiques (Portefeuille et Répartition)
-# Je les conserve sans modification pour économiser des tokens
 
 with tab2:
     st.header("Portefeuille consolidé")
@@ -1347,58 +1285,208 @@ with tab2:
             )
             st.plotly_chart(fig_line, use_container_width=True)
 
-# Tab 3 : Répartition (code identique conservé)
-# Tab 4 : Calendrier (code identique conservé)
-
-# ✅ NOUVEAU : Tab 5 - Gestion (Soft Delete)
-with tab5:
-    st.header("🗑️ Gestion des transactions")
-    
-    st.markdown("""
-    Cette section permet de supprimer des transactions (soft delete).
-    Les transactions supprimées restent auditables dans la sheet mais n'impactent plus les calculs.
-    """)
+# -----------------------
+# ONGLET 3 : Répartition par Profil
+# -----------------------
+with tab3:
+    st.header("Répartition portefeuilles individuels")
     
     if st.session_state.df_transactions is None or st.session_state.df_transactions.empty:
         st.info("ℹ️ Aucune transaction")
     else:
-        df_all = st.session_state.df_transactions.copy()
+        devise_affichage = st.session_state.devise_affichage
+        symbole = "€" if devise_affichage == "EUR" else "$"
         
-        # Filtre actives/supprimées
-        view_mode = st.radio(
-            "Affichage",
-            ["Transactions actives", "Transactions supprimées", "Toutes"],
-            horizontal=True
-        )
+        profils = sorted(st.session_state.df_transactions["Profil"].unique())
+        cols = st.columns(len(profils))
         
-        if view_mode == "Transactions actives":
-            df_view = df_all[~df_all["is_deleted"].apply(parse_bool)]
-        elif view_mode == "Transactions supprimées":
-            df_view = df_all[df_all["is_deleted"].apply(parse_bool)]
+        for i, profil in enumerate(profils):
+            with cols[i]:
+                st.subheader(f"👤 {profil}")
+                
+                # Filtrage transactions profil
+                df_profil = st.session_state.df_transactions[
+                    st.session_state.df_transactions["Profil"] == profil
+                ]
+                
+                engine_profil = PortfolioEngine(df_profil)
+                summary_profil = engine_profil.get_portfolio_summary_converted(
+                    profil=profil,
+                    target_currency=devise_affichage,
+                    currency_manager=currency_manager
+                )
+                positions_profil = engine_profil.get_positions(profil=profil)
+                
+                if not positions_profil.empty:
+                    # ÉTAPE 1 : Récupération des prix
+                    tickers_profil = positions_profil["Ticker"].tolist()
+                    prices_profil = fetch_last_close_batch(tickers_profil)
+                    
+                    # ÉTAPE 2 : Ajout prix actuels avec sécurité None
+                    positions_profil["Prix_actuel"] = positions_profil["Ticker"].map(prices_profil)
+                    positions_profil["Prix_actuel"] = positions_profil["Prix_actuel"].fillna(0.0)
+                    
+                    # ÉTAPE 3 : Calcul Valeur origine
+                    positions_profil["Valeur_origine"] = (
+                        positions_profil["Quantité"] * positions_profil["Prix_actuel"]
+                    )
+                    
+                    # ÉTAPE 4 : Calcul PnL latent (AVANT conversion)
+                    positions_profil["PnL_latent"] = (
+                        (positions_profil["Prix_actuel"] - positions_profil["PRU"])
+                        * positions_profil["Quantité"]
+                    )
+                    # ✅ Coût investi (cost basis) = PRU * Quantité
+                    positions_profil["Cost_basis_origine"] = positions_profil["PRU"] * positions_profil["Quantité"]
+                    positions_profil["PnL_latent_%"] = (
+                        (positions_profil["Prix_actuel"] - positions_profil["PRU"]) 
+                        / positions_profil["PRU"] * 100
+                    ).round(2)
+                    positions_profil["PnL_latent_%"] = positions_profil["PnL_latent_%"].fillna(0.0)
+
+                    # ✅ Conversion du coût investi dans la devise d'affichage
+                    positions_profil["Cost_basis_converti"] = positions_profil.apply(
+                        lambda row: currency_manager.convert(
+                            row["Cost_basis_origine"], row["Devise"], devise_affichage
+                        ) if row["Devise"] != devise_affichage
+                        else row["Cost_basis_origine"],
+                        axis=1
+                    )           
+
+                    # ÉTAPE 5 : Conversion Valeur (APRÈS avoir créé Valeur_origine)
+                    positions_profil["Valeur_convertie"] = positions_profil.apply(
+                        lambda row: currency_manager.convert(
+                            row["Valeur_origine"], row["Devise"], devise_affichage
+                        ) if row["Devise"] != devise_affichage and row["Prix_actuel"] is not None and row["Prix_actuel"] > 0
+                        else row["Valeur_origine"],
+                        axis=1
+                    )
+                    
+                    # ÉTAPE 6 : Conversion PnL latent (APRÈS avoir créé PnL_latent)
+                    positions_profil["PnL_latent_converti"] = positions_profil.apply(
+                        lambda row: currency_manager.convert(
+                            row["PnL_latent"], row["Devise"], devise_affichage
+                        ) if row["Devise"] != devise_affichage and row["Prix_actuel"] is not None
+                        else row["PnL_latent"],
+                        axis=1
+                    )
+                    
+                    # ÉTAPE 7 : Agrégation totaux
+                    total_valeur_profil = positions_profil["Valeur_convertie"].sum()
+                    total_pnl_latent_profil = positions_profil["PnL_latent_converti"].sum()
+                    total_cost_basis_profil = positions_profil["Cost_basis_converti"].sum()
+
+                    pnl_latent_pct_profil = (total_pnl_latent_profil / total_cost_basis_profil * 100) if total_cost_basis_profil > 0 else 0.0
+                    total_cost_basis_profil = 0.0
+                    pnl_latent_pct_profil = 0.0
+
+
+                # --- KPI Bloc compact ---
+                row1_col1, row1_col2 = st.columns(2)
+                row2_col1, row2_col2 = st.columns(2)
+                row3_col1, row3_col2 = st.columns(2)
+                
+                row1_col1.metric("💵 Dépôts", f"{summary_profil['total_depots']:,.0f} {symbole}")
+                row1_col2.metric("💰 Liquidités", f"{summary_profil['cash']:,.0f} {symbole}")
+                row2_col1.metric("📊 Valeur actifs", f"{total_valeur_profil:,.0f} {symbole}")
+                row2_col2.metric(
+                    "📈 PnL Latent",
+                    f"{total_pnl_latent_profil:,.0f} {symbole}",
+                    delta=f"{pnl_latent_pct_profil:.2f}%"
+                )
+                row3_col1.metric("✅ PnL Réalisé", f"{summary_profil['pnl_realise_total']:,.0f} {symbole}")
+                row3_col2.metric("💎 Total", f"{summary_profil['cash'] + total_valeur_profil:,.0f} {symbole}")
+                
+                st.divider()
+                
+                # --- Tableau positions ---
+                if not positions_profil.empty:
+                    st.caption("**Top 5 Positions**")
+                    
+                    # ✅ Utilisation de la fonction utilitaire (si disponible)
+                    try:
+                        from utils import format_positions_display
+                        
+                        positions_display_profil = format_positions_display(
+                            positions=positions_profil,
+                            prices=prices_profil,
+                            currency_manager=currency_manager,
+                            target_currency=devise_affichage,
+                            sort_by="PnL_latent_converti",
+                            ascending=False
+                        )
+                        st.dataframe(
+                            positions_display_profil.head(5),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    
+                    except ImportError:
+                        # Fallback si utils.py n'existe pas
+                        display_cols = ["Ticker", "Nom complet", "Quantité", "PRU", "Devise"]
+                        st.dataframe(
+                            positions_profil[display_cols].head(5),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    
+                    # --- Graphique camembert ---
+                    fig_profil = px.pie(
+                        positions_profil.dropna(subset=["Valeur_convertie"]),
+                        values="Valeur_convertie",
+                        names="Nom complet",
+                        title=f"Répartition {profil}"
+                    )
+                    st.plotly_chart(fig_profil, use_container_width=True)
+                else:
+                    st.info("ℹ️ Aucune position ouverte")
+            
+            # Séparateur visuel entre profils
+            if i < len(profils) - 1:
+                st.markdown(
+                    "<div style='height:3px; background:linear-gradient(to right, #ccc, #888, #ccc); "
+                    "margin:20px 0; border-radius:3px;'></div>",
+                    unsafe_allow_html=True
+                )
+# -----------------------
+# ONGLET 4 : Calendrier
+# -----------------------
+with tab4:
+    st.header("📅 Calendrier économique")
+    st.info("ℹ️ Fonctionnalité à venir - Phase 2")
+    
+    st.subheader("💰 Dividendes reçus")
+    
+    if st.session_state.df_transactions is not None:
+        df_div = st.session_state.df_transactions[
+            st.session_state.df_transactions["Type"] == "Dividende"
+        ].copy()
+        
+        if not df_div.empty:
+            df_div["Date_sort"] = pd.to_datetime(df_div["Date"])
+            df_div = df_div.sort_values("Date_sort", ascending=False)
+            
+            # Tableau dividendes
+            display_div = df_div[[
+                "Date", "Profil", "Ticker", "Nom complet",
+                "PnL réalisé (€/$)", "Devise", "Note"
+            ]].head(20)
+            st.dataframe(display_div, use_container_width=True, hide_index=True)
+            
+            # Graphique total dividendes par ticker
+            div_by_ticker = df_div.groupby("Ticker")["PnL réalisé (€/$)"].sum().sort_values(ascending=False)
+            
+            fig_div = px.bar(
+                x=div_by_ticker.index,
+                y=div_by_ticker.values,
+                title="Total dividendes par ticker",
+                labels={"x": "Ticker", "y": "Dividendes nets"},
+                color=div_by_ticker.values,
+                color_continuous_scale=["lightblue", "darkblue"]
+            )
+            st.plotly_chart(fig_div, use_container_width=True)
         else:
-            df_view = df_all
-        
-        if df_view.empty:
-            st.info(f"ℹ️ Aucune transaction dans cette catégorie")
-        else:
-            st.subheader(f"📋 {len(df_view)} transaction(s)")
-            
-            # Tri par date décroissante
-            df_view["Date_sort"] = pd.to_datetime(df_view["Date"], errors="coerce")
-            df_view = df_view.sort_values("Date_sort", ascending=False)
-            
-            # Table sélectionnable
-            display_cols = [
-                "Date", "Type", "Ticker", "Nom complet", "Profil",
-                "Quantité", "Prix_unitaire", "Devise",
-                "transaction_id", "is_deleted"
-            ]
-            
-            df_display = df_view[[c for c in display_cols if c in df_view.columns]].head(50)
-            
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-            
-            st.divider()
+            st.info("ℹ️ Aucun dividende enregistré")
 
 # -----------------------
 # SIDEBAR : Actions & Stats
