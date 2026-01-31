@@ -504,7 +504,7 @@ def fetch_last_close_batch(tickers: list) -> dict:
     except Exception as e:
         st.warning(f"⚠️ yfinance batch failed: {e}")
 
-    # 3) Fallback 5d + résolution automatique .F ↔ .DE pour tickers manquants
+    # 3) Fallback 5d + résolution automatique pour tickers manquants
     for t in tickers_to_resolve:
         if prices.get(t, 0.0) > 0:
             continue
@@ -531,23 +531,48 @@ def fetch_last_close_batch(tickers: list) -> dict:
         price = fetch_single_ticker(t)
         resolved_ticker = t
         
-        # Si échec et ticker allemand → tester fallback .F ↔ .DE
+        # Si échec → tester fallback selon le marché
         if price is None or price == 0.0:
-            if t.endswith(".F"):
-                alt_ticker = t[:-2] + ".DE"
-                alt_price = fetch_single_ticker(alt_ticker)
-                if alt_price is not None and alt_price > 0:
-                    price = alt_price
-                    resolved_ticker = alt_ticker
-                    st.info(f"ℹ️ Résolution ticker : {t} → {alt_ticker}")
+            # Définir les paires de fallback
+            FALLBACK_PAIRS = {
+                # 🇩🇪 Allemagne : Francfort ↔ Xetra
+                ".F": ".DE",
+                ".DE": ".F",
+                # 🇮🇳 Inde : NSE ↔ BSE
+                ".NS": ".BO",
+                ".BO": ".NS",
+                # 🇨🇦 Canada : TSX ↔ TSXV
+                ".TO": ".V",
+                ".V": ".TO",
+                # 🇨🇳 Chine : Shanghai ↔ Shenzhen
+                ".SS": ".SZ",
+                ".SZ": ".SS",
+            }
             
-            elif t.endswith(".DE"):
-                alt_ticker = t[:-3] + ".F"
-                alt_price = fetch_single_ticker(alt_ticker)
-                if alt_price is not None and alt_price > 0:
-                    price = alt_price
-                    resolved_ticker = alt_ticker
-                    st.info(f"ℹ️ Résolution ticker : {t} → {alt_ticker}")
+            # Chercher et appliquer fallback si applicable
+            for suffix, alt_suffix in FALLBACK_PAIRS.items():
+                if t.endswith(suffix):
+                    base = t[:-len(suffix)]
+                    alt_ticker = base + alt_suffix
+                    alt_price = fetch_single_ticker(alt_ticker)
+                    
+                    if alt_price is not None and alt_price > 0:
+                        price = alt_price
+                        resolved_ticker = alt_ticker
+                        # Afficher message selon le marché
+                        market_name = {
+                            ".F": "Allemagne (Francfort → Xetra)",
+                            ".DE": "Allemagne (Xetra → Francfort)",
+                            ".NS": "Inde (NSE → BSE)",
+                            ".BO": "Inde (BSE → NSE)",
+                            ".TO": "Canada (TSX → TSXV)",
+                            ".V": "Canada (TSXV → TSX)",
+                            ".SS": "Chine (Shanghai → Shenzhen)",
+                            ".SZ": "Chine (Shenzhen → Shanghai)",
+                        }.get(suffix, "Marché alternatif")
+                        
+                        st.info(f"ℹ️ {market_name}: {t} → {alt_ticker}")
+                    break  # On a testé le fallback, sortir de la boucle
         
         # Stocker le résultat
         if price is not None and price > 0:
@@ -759,7 +784,7 @@ def get_ticker_full_name(ticker: str) -> str:
 # -----------------------
 # ONGLET 1 : Transactions
 # -----------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "💰 Transactions",
     "📂 Portefeuille",
     "📊 Répartition",
