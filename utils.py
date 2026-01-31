@@ -19,62 +19,272 @@ def get_iso_timestamp() -> str:
 
 def normalize_ticker(raw_ticker: str) -> str:
     """
-    Normalise les tickers pour compatibilité yfinance.
+    Normalise les tickers pour compatibilité yfinance - Support MONDIAL (50+ marchés).
     
-    Mapping Alpha Vantage → yfinance :
-    - Euronext Paris: .PAR → .PA
-    - Euronext Amsterdam: .AMS, .AEX → .AS
-    - Euronext Brussels: .BRU → .BR
-    - Allemagne Francfort: .FRK, .FRA → .F
-    - Allemagne Xetra: .ETR, .XETRA, .GER → .DE
-    - Milan: .MIL → .MI
-    - Madrid: .MAD → .MC
-    - London: .LON, .LSE → .L
+    📍 EUROPE
+    - France (Euronext Paris): .PAR → .PA
+    - Netherlands (Euronext Amsterdam): .AMS, .AEX → .AS
+    - Belgium (Euronext Brussels): .BRU → .BR
+    - Germany (Frankfurt): .FRK, .FRA → .F
+    - Germany (Xetra): .ETR, .XETRA, .GER → .DE
+    - Italy (Milan): .MIL → .MI
+    - Spain (Madrid): .MAD → .MC
+    - UK (London): .LON, .LSE → .L
+    - Switzerland (SIX): .SWX, .VTX → .SW
+    - Portugal (Lisbon): .LIS → .LS
+    - Ireland (Dublin): .ISE → .IR
+    - Austria (Vienna): .VIE → .VI
+    - Denmark (Copenhagen): .CPH → .CO
+    - Sweden (Stockholm): .STO → .ST
+    - Norway (Oslo): .OSL → .OL
+    - Finland (Helsinki): .HEL → .HE
+    - Poland (Warsaw): .WAR → .WA
+    - Czech Republic (Prague): .PRA → .PR
+    - Turkey (Istanbul): .IST → .IS
+    - Greece (Athens): .ATH → .AT
     
-    Suffixes yfinance déjà valides (inchangés) :
-    .PA, .AS, .BR, .F, .DE, .MI, .MC, .L
+    🌏 ASIE-PACIFIQUE
+    - Hong Kong: .HKG → .HK
+    - Japan (Tokyo): .TYO → .T
+    - Australia (ASX): .AX (inchangé)
+    - Singapore: .SES → .SI
+    - India (NSE): .NSE → .NS
+    - India (BSE): .BSE → .BO
+    - South Korea (KRX): .KRX, .KSE → .KS
+    - Taiwan: .TWO → .TW
+    - Thailand (SET): .BKK → .BK
+    - Malaysia: .KLS → .KL
+    - Indonesia: .JKT → .JK
+    - Philippines: .PSE → .PS
+    - New Zealand: .NZE → .NZ
+    - China (Shanghai): .SHA → .SS
+    - China (Shenzhen): .SHE → .SZ
+    
+    🌎 AMÉRIQUES
+    - Canada (TSX): .TOR, .TSE → .TO
+    - Canada (TSXV): .CVE → .V
+    - Mexico: .MEX → .MX
+    - Brazil (B3): .SAO → .SA
+    - Chile: .SGO → .SN
+    - Argentina: .BUE → .BA
+    
+    🌍 MOYEN-ORIENT & AFRIQUE
+    - Saudi Arabia (Tadawul): .SAU → .SAU (inchangé mais reconnu)
+    - UAE (DFM): .DFM → .DU (Dubai)
+    - Qatar: .QAT → .QA
+    - South Africa (JSE): .JNB → .JO
+    - Egypt: .CAI → .CA
+    
+    🔷 AUTRES
+    - US (NASDAQ/NYSE): Sans suffixe ou .US (inchangé)
+    - Iceland: .ICE → .IC
     
     Args:
-        raw_ticker: Ticker brut (ex: "LVMH.PAR", "INPST.AMS", "ALV.FRK")
+        raw_ticker: Ticker brut (ex: "NESN.SWX", "7203.TYO", "RIO.AX")
     
     Returns:
-        Ticker normalisé (ex: "LVMH.PA", "INPST.AS", "ALV.F")
+        Ticker normalisé yfinance (ex: "NESN.SW", "7203.T", "RIO.AX")
     """
     if not raw_ticker or not isinstance(raw_ticker, str):
         return raw_ticker
     
     ticker = raw_ticker.strip().upper()
     
-    # Table de mapping Alpha Vantage → yfinance
+    # Table de mapping complète (Alpha Vantage / Bloomberg / Reuters → yfinance)
     SUFFIX_MAPPING = {
-        # Euronext Paris
+        # 🇫🇷 EURONEXT PARIS
         ".PAR": ".PA",
+        ".PARIS": ".PA",
         
-        # Euronext Amsterdam
+        # 🇳🇱 EURONEXT AMSTERDAM
         ".AMS": ".AS",
         ".AEX": ".AS",
+        ".AMSTERDAM": ".AS",
         
-        # Euronext Brussels
+        # 🇧🇪 EURONEXT BRUSSELS
         ".BRU": ".BR",
+        ".BRUSSELS": ".BR",
         
-        # Allemagne - Francfort
+        # 🇩🇪 ALLEMAGNE - Francfort
         ".FRK": ".F",
         ".FRA": ".F",
+        ".FRANKFURT": ".F",
         
-        # Allemagne - Xetra (prioritaire pour actions allemandes)
+        # 🇩🇪 ALLEMAGNE - Xetra
         ".ETR": ".DE",
         ".XETRA": ".DE",
         ".GER": ".DE",
+        ".GERMANY": ".DE",
         
-        # Milan
+        # 🇮🇹 MILAN
         ".MIL": ".MI",
+        ".MILAN": ".MI",
         
-        # Madrid
+        # 🇪🇸 MADRID
         ".MAD": ".MC",
+        ".MADRID": ".MC",
         
-        # London
+        # 🇬🇧 LONDON
         ".LON": ".L",
         ".LSE": ".L",
+        ".LONDON": ".L",
+        
+        # 🇨🇭 SUISSE (SIX Swiss Exchange)
+        ".SWX": ".SW",
+        ".VTX": ".SW",
+        ".SWISS": ".SW",
+        
+        # 🇵🇹 PORTUGAL (Lisbon)
+        ".LIS": ".LS",
+        ".LISBON": ".LS",
+        
+        # 🇮🇪 IRELAND (Dublin)
+        ".ISE": ".IR",
+        ".DUBLIN": ".IR",
+        
+        # 🇦🇹 AUSTRIA (Vienna)
+        ".VIE": ".VI",
+        ".VIENNA": ".VI",
+        
+        # 🇩🇰 DENMARK (Copenhagen)
+        ".CPH": ".CO",
+        ".COPENHAGEN": ".CO",
+        
+        # 🇸🇪 SWEDEN (Stockholm)
+        ".STO": ".ST",
+        ".STOCKHOLM": ".ST",
+        
+        # 🇳🇴 NORWAY (Oslo)
+        ".OSL": ".OL",
+        ".OSLO": ".OL",
+        
+        # 🇫🇮 FINLAND (Helsinki)
+        ".HEL": ".HE",
+        ".HELSINKI": ".HE",
+        
+        # 🇵🇱 POLAND (Warsaw)
+        ".WAR": ".WA",
+        ".WARSAW": ".WA",
+        
+        # 🇨🇿 CZECH REPUBLIC (Prague)
+        ".PRA": ".PR",
+        ".PRAGUE": ".PR",
+        
+        # 🇹🇷 TURKEY (Istanbul)
+        ".IST": ".IS",
+        ".ISTANBUL": ".IS",
+        
+        # 🇬🇷 GREECE (Athens)
+        ".ATH": ".AT",
+        ".ATHENS": ".AT",
+        
+        # 🇭🇰 HONG KONG
+        ".HKG": ".HK",
+        ".HKEX": ".HK",
+        
+        # 🇯🇵 JAPAN (Tokyo)
+        ".TYO": ".T",
+        ".TOKYO": ".T",
+        ".JPX": ".T",
+        
+        # 🇸🇬 SINGAPORE
+        ".SES": ".SI",
+        ".SGX": ".SI",
+        ".SINGAPORE": ".SI",
+        
+        # 🇮🇳 INDIA (NSE)
+        ".NSE": ".NS",
+        
+        # 🇮🇳 INDIA (BSE)
+        ".BSE": ".BO",
+        ".BOMBAY": ".BO",
+        
+        # 🇰🇷 SOUTH KOREA
+        ".KRX": ".KS",
+        ".KSE": ".KS",
+        ".KOREA": ".KS",
+        
+        # 🇹🇼 TAIWAN
+        ".TWO": ".TW",
+        ".TAIWAN": ".TW",
+        
+        # 🇹🇭 THAILAND (Bangkok)
+        ".BKK": ".BK",
+        ".SET": ".BK",
+        ".BANGKOK": ".BK",
+        
+        # 🇲🇾 MALAYSIA
+        ".KLS": ".KL",
+        ".KLSE": ".KL",
+        
+        # 🇮🇩 INDONESIA (Jakarta)
+        ".JKT": ".JK",
+        ".IDX": ".JK",
+        ".JAKARTA": ".JK",
+        
+        # 🇵🇭 PHILIPPINES
+        ".PSE": ".PS",
+        ".MANILA": ".PS",
+        
+        # 🇳🇿 NEW ZEALAND
+        ".NZE": ".NZ",
+        ".NZX": ".NZ",
+        
+        # 🇨🇳 CHINA (Shanghai)
+        ".SHA": ".SS",
+        ".SHANGHAI": ".SS",
+        
+        # 🇨🇳 CHINA (Shenzhen)
+        ".SHE": ".SZ",
+        ".SHENZHEN": ".SZ",
+        
+        # 🇨🇦 CANADA (TSX)
+        ".TOR": ".TO",
+        ".TSE": ".TO",
+        ".TORONTO": ".TO",
+        
+        # 🇨🇦 CANADA (TSXV - Venture)
+        ".CVE": ".V",
+        ".VENTURE": ".V",
+        
+        # 🇲🇽 MEXICO
+        ".MEX": ".MX",
+        ".BMV": ".MX",
+        ".MEXICO": ".MX",
+        
+        # 🇧🇷 BRAZIL (B3)
+        ".SAO": ".SA",
+        ".BVMF": ".SA",
+        ".BRAZIL": ".SA",
+        
+        # 🇨🇱 CHILE (Santiago)
+        ".SGO": ".SN",
+        ".SANTIAGO": ".SN",
+        
+        # 🇦🇷 ARGENTINA (Buenos Aires)
+        ".BUE": ".BA",
+        ".BUENOSAIRES": ".BA",
+        
+        # 🇿🇦 SOUTH AFRICA (Johannesburg)
+        ".JNB": ".JO",
+        ".JSE": ".JO",
+        ".JOHANNESBURG": ".JO",
+        
+        # 🇪🇬 EGYPT (Cairo)
+        ".CAI": ".CA",
+        ".CAIRO": ".CA",
+        
+        # 🇶🇦 QATAR
+        ".QAT": ".QA",
+        ".DOHA": ".QA",
+        
+        # 🇦🇪 UAE (Dubai)
+        ".DFM": ".DU",
+        ".DUBAI": ".DU",
+        
+        # 🇮🇸 ICELAND
+        ".ICE": ".IC",
+        ".ICELAND": ".IC",
     }
     
     # Appliquer le mapping si suffixe connu
@@ -83,8 +293,23 @@ def normalize_ticker(raw_ticker: str) -> str:
             base = ticker[:-len(old_suffix)]
             return base + new_suffix
     
-    # Suffixes yfinance valides (pas de modification)
-    VALID_YFINANCE_SUFFIXES = [".PA", ".AS", ".BR", ".F", ".DE", ".MI", ".MC", ".L"]
+    # Suffixes yfinance valides (pas de modification nécessaire)
+    VALID_YFINANCE_SUFFIXES = [
+        # Europe
+        ".PA", ".AS", ".BR", ".F", ".DE", ".MI", ".MC", ".L", 
+        ".SW", ".LS", ".IR", ".VI", ".CO", ".ST", ".OL", ".HE",
+        ".WA", ".PR", ".IS", ".AT",
+        # Asie-Pacifique
+        ".HK", ".T", ".AX", ".SI", ".NS", ".BO", ".KS", ".TW",
+        ".BK", ".KL", ".JK", ".PS", ".NZ", ".SS", ".SZ",
+        # Amériques
+        ".TO", ".V", ".MX", ".SA", ".SN", ".BA",
+        # Moyen-Orient & Afrique
+        ".SAU", ".QA", ".DU", ".JO", ".CA",
+        # Autres
+        ".IC"
+    ]
+    
     for suffix in VALID_YFINANCE_SUFFIXES:
         if ticker.endswith(suffix):
             return ticker
@@ -94,17 +319,17 @@ def normalize_ticker(raw_ticker: str) -> str:
 
 def resolve_ticker_with_fallback(ticker: str, price_fetcher_func) -> Tuple[str, Optional[float]]:
     """
-    Résout un ticker avec fallback automatique pour l'Allemagne (.F ↔ .DE).
+    Résout un ticker avec fallback automatique pour marchés avec variantes.
     
-    Logique :
-    1. Essayer le ticker normalisé tel quel
-    2. Si prix N/A et suffixe allemand → tester variante alternative
-       - .F → essayer .DE
-       - .DE → essayer .F
-    3. Retourner le premier ticker qui fonctionne
+    Logique de fallback par marché :
+    
+    🇩🇪 ALLEMAGNE: .F ↔ .DE (Francfort vs Xetra)
+    🇮🇳 INDE: .NS ↔ .BO (NSE vs BSE)
+    🇨🇦 CANADA: .TO ↔ .V (TSX vs TSXV)
+    🇨🇳 CHINE: .SS ↔ .SZ (Shanghai vs Shenzhen)
     
     Args:
-        ticker: Ticker normalisé (ex: "ALV.F", "INPST.AS")
+        ticker: Ticker normalisé (ex: "ALV.F", "RELIANCE.NS")
         price_fetcher_func: Fonction qui prend un ticker et retourne le prix ou None
     
     Returns:
@@ -112,9 +337,12 @@ def resolve_ticker_with_fallback(ticker: str, price_fetcher_func) -> Tuple[str, 
         - ticker_resolved : le ticker qui a fonctionné
         - price : le prix récupéré (ou None si échec total)
     
-    Exemple:
+    Exemples:
         >>> resolve_ticker_with_fallback("ALV.F", fetch_func)
         ("ALV.DE", 245.30)  # Si .F a échoué mais .DE a fonctionné
+        
+        >>> resolve_ticker_with_fallback("RELIANCE.NS", fetch_func)
+        ("RELIANCE.BO", 2450.75)  # Si NSE down mais BSE up
     """
     # Essayer le ticker normalisé d'abord
     price = price_fetcher_func(ticker)
@@ -122,22 +350,40 @@ def resolve_ticker_with_fallback(ticker: str, price_fetcher_func) -> Tuple[str, 
     if price is not None and price > 0:
         return ticker, price
     
-    # Fallback uniquement pour les tickers allemands
-    if ticker.endswith(".F"):
-        # Essayer .DE à la place
-        alt_ticker = ticker[:-2] + ".DE"
-        alt_price = price_fetcher_func(alt_ticker)
+    # Définir les paires de fallback par marché
+    FALLBACK_PAIRS = {
+        # Allemagne : Francfort ↔ Xetra
+        ".F": ".DE",
+        ".DE": ".F",
         
-        if alt_price is not None and alt_price > 0:
-            return alt_ticker, alt_price
+        # Inde : NSE ↔ BSE
+        ".NS": ".BO",
+        ".BO": ".NS",
+        
+        # Canada : TSX ↔ TSXV
+        ".TO": ".V",
+        ".V": ".TO",
+        
+        # Chine : Shanghai ↔ Shenzhen
+        ".SS": ".SZ",
+        ".SZ": ".SS",
+    }
     
-    elif ticker.endswith(".DE"):
-        # Essayer .F à la place
-        alt_ticker = ticker[:-3] + ".F"
-        alt_price = price_fetcher_func(alt_ticker)
-        
-        if alt_price is not None and alt_price > 0:
-            return alt_ticker, alt_price
+    # Tenter fallback si applicable
+    for suffix, alt_suffix in FALLBACK_PAIRS.items():
+        if ticker.endswith(suffix):
+            # Construire ticker alternatif
+            base = ticker[:-len(suffix)]
+            alt_ticker = base + alt_suffix
+            
+            # Essayer le ticker alternatif
+            alt_price = price_fetcher_func(alt_ticker)
+            
+            if alt_price is not None and alt_price > 0:
+                return alt_ticker, alt_price
+            
+            # On a trouvé le suffixe, pas besoin de continuer la boucle
+            break
     
     # Aucun fallback n'a fonctionné
     return ticker, None
